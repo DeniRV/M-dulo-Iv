@@ -1,0 +1,129 @@
+---
+title: "Tarea 1"
+output: html_document
+date: "2024-01-31"
+---
+```{r}
+library(ggplot2)
+library(hrbrthemes)
+library(dplyr)
+library(reshape2)
+library(glmtoolbox)
+library(stats)
+library(caret)
+library(readr)
+```
+
+
+```{r}
+Base_1 <- read.csv("C:/Users/ASUS/Desktop/Diplomado/Módulo IV/Semana 1/Tarea/FLORIDA2.csv")
+
+tail(Base_1)
+
+```
+
+
+
+```{r,message=FALSE, warning=FALSE}
+
+manejar_datos <- function(data){
+  n_row <- nrow(data)
+  nulos <- colSums(is.na(data))
+  columnas_nulos <- names(nulos[nulos > n_row*0.3])
+  data<-data %>% select(-columnas_nulos)
+  
+  columnas_numericas <- names(data %>% select_if(is.numeric))
+  columnas_categoricas <- names(data %>% select_if(is.character))
+  columnas_logicas <- names(data %>% select_if(is.logical))
+  
+  
+  for(col in columnas_numericas){
+    q1 <- quantile(data[[col]], 0.25, na.rm=TRUE)
+    q3 <- quantile(data[[col]], 0.75, na.rm=TRUE)
+    iqr <- q3 - q1
+    lower <- q1 - 1.5 * iqr
+    upper <- q3 + 1.5 * iqr
+    data[[col]] <- ifelse(data[[col]]< lower | data[[col]]> upper, NA, data[[col]])
+  }
+  
+  for(col in columnas_numericas){
+    data[[col]] <- ifelse(is.na(data[[col]]), mean(data[[col]], na.rm = TRUE), data[[col]])
+  }
+  
+  for(col in columnas_categoricas){
+    moda<- data[[col]] [which.max(tabulate(match(data[[col]],unique(data[[col]]))))]
+data[[col]]<- ifelse(is.na(data[[col]]), moda, data[[col]])
+    
+  }
+  for(col in columnas_categoricas){
+      if(length(unique(data[[col]]))==1){
+        data<-data%>%select(-col)
+      }
+  }
+  
+  
+  for(col in columnas_logicas){
+    moda<- data[[col]] [which.max(tabulate(match(data[[col]],unique(data[[col]]))))]
+data[[col]]<- ifelse(is.na(data[[col]]), moda, data[[col]])
+    
+  }
+  for(col in columnas_logicas){
+      if(length(unique(data[[col]]))==1){
+        data<-data%>%select(-col)
+      }
+  }
+  
+  
+    data<- distinct(data)
+    return(data)
+}
+Base_1_limpia<- manejar_datos(Base_1)
+
+
+```
+
+
+```{r}
+Base_1_limpia <- Base_1_limpia%>%
+  mutate(yearBuilt = as.integer(round(yearBuilt)))
+
+Base_1_limpia <- Base_1_limpia%>%
+  mutate(bedrooms = as.integer(round(bedrooms)))
+
+Base_1_limpia <- Base_1_limpia%>%
+  mutate(yearBuilt_cat = as.character(yearBuilt_cat))
+
+Base_1_limpia <- Base_1_limpia %>%
+  mutate(zipcode = as.character(zipcode))
+
+```
+
+
+
+
+
+```{r}
+Numericas <- Base_1_limpia %>%
+  select(bedrooms,bathrooms, price, yearBuilt_cat, livingArea)
+
+summary(Numericas)
+```
+
+
+```{r}
+precio_venta <- Numericas %>%
+  filter(price > 100000 & price < 2000000)%>%
+  filter(livingArea > 12 & livingArea < 5000)
+
+summary(precio_venta)
+
+```
+
+
+
+```{r}
+Categoricas <- Base_1_limpia %>%
+  select(yearBuilt_cat, zipcode, city, homeType)
+
+summary(Categoricas)
+```
