@@ -1,0 +1,272 @@
+---
+title: "Tarea 1"
+output: html_document
+date: "2024-01-31"
+---
+```{r}
+library(ggplot2)
+library(hrbrthemes)
+library(dplyr)
+library(reshape2)
+library(glmtoolbox)
+library(stats)
+library(caret)
+library(readr)
+library(tidyr)
+library(glmnet)
+```
+
+
+```{r}
+Base_1 <- read.csv("C:/Users/ASUS/Desktop/Diplomado/Módulo IV/Semana 1/Tarea/FLORIDA2.csv")
+
+tail(Base_1)
+
+```
+
+
+```{r,message=FALSE, warning=FALSE}
+
+manejar_datos <- function(data){
+  n_row <- nrow(data)
+  nulos <- colSums(is.na(data))
+  columnas_nulos <- names(nulos[nulos > n_row*0.3])
+  data<-data %>% select(-columnas_nulos)
+  
+  columnas_numericas <- names(data %>% select_if(is.numeric))
+  columnas_categoricas <- names(data %>% select_if(is.character))
+  columnas_logicas <- names(data %>% select_if(is.logical))
+  
+  
+  for(col in columnas_numericas){
+    q1 <- quantile(data[[col]], 0.25, na.rm=TRUE)
+    q3 <- quantile(data[[col]], 0.75, na.rm=TRUE)
+    iqr <- q3 - q1
+    lower <- q1 - 1.5 * iqr
+    upper <- q3 + 1.5 * iqr
+    data[[col]] <- ifelse(data[[col]]< lower | data[[col]]> upper, NA, data[[col]])
+  }
+  
+  for(col in columnas_numericas){
+    data[[col]] <- ifelse(is.na(data[[col]]), mean(data[[col]], na.rm = TRUE), data[[col]])
+  }
+  
+  for(col in columnas_categoricas){
+    moda<- data[[col]] [which.max(tabulate(match(data[[col]],unique(data[[col]]))))]
+data[[col]]<- ifelse(is.na(data[[col]]), moda, data[[col]])
+    
+  }
+  for(col in columnas_categoricas){
+      if(length(unique(data[[col]]))==1){
+        data<-data%>%select(-col)
+      }
+  }
+  
+  
+  for(col in columnas_logicas){
+    moda<- data[[col]] [which.max(tabulate(match(data[[col]],unique(data[[col]]))))]
+data[[col]]<- ifelse(is.na(data[[col]]), moda, data[[col]])
+    
+  }
+  for(col in columnas_logicas){
+      if(length(unique(data[[col]]))==1){
+        data<-data%>%select(-col)
+      }
+  }
+  
+  
+    data<- distinct(data)
+    return(data)
+}
+Base_1_limpia<- manejar_datos(Base_1)
+
+
+```
+
+
+```{r}
+Base_1_limpia <- Base_1_limpia%>%
+  mutate(yearBuilt = as.integer(round(yearBuilt)))
+
+Base_1_limpia <- Base_1_limpia%>%
+  mutate(yearBuilt = as.character(yearBuilt))
+
+Base_1_limpia <- Base_1_limpia%>%
+  mutate(zipcode = as.integer(round(zipcode)))
+
+Base_1_limpia <- Base_1_limpia%>%
+  mutate(bedrooms = as.integer(round(bedrooms)))
+
+Base_1_limpia <- Base_1_limpia%>%
+  mutate(yearBuilt_cat = as.character(yearBuilt_cat))
+
+Base_1_limpia <- Base_1_limpia %>%
+  mutate(zipcode = as.character(zipcode))
+
+
+```
+
+
+
+```{r}
+Base_elegida <- Base_1_limpia %>%
+  select(price,bedrooms,bathrooms,  livingArea, yearBuilt_cat, zipcode, city, homeType)
+
+summary(Base_elegida)
+```
+
+
+```{r}
+Base_elegida <- Base_elegida %>%
+  filter(price > 100000 & price < 2000000)%>%
+  filter(livingArea > 12 & livingArea < 5000)
+
+summary(Base_elegida)
+
+```
+
+```{r}
+rango_año_construcción <- data.frame(table(Base_elegida$yearBuilt_cat))
+codigo_postal <- data.frame(table(Base_elegida$zipcode))
+Condado <- data.frame(table(Base_elegida$city))
+Tipo_casa <- data.frame(table(Base_elegida$homeType))
+```
+
+
+
+```{r}
+Data_descriptiva <- Base_elegida %>%
+  group_by(yearBuilt_cat, zipcode, city, homeType) %>%
+  summarise(CONTEO = n(),
+            Promedio_Precio = mean(price),
+            DS_Precio = sd(price),
+            Promedio_hab = mean(bedrooms),
+            SD_hab = sd(bedrooms),
+            Promedio_baños = mean(bathrooms),
+            SD_baños = sd(bathrooms),
+            Promedio_L.A = mean(livingArea),
+            SD_L.A = sd(livingArea))
+```
+
+Estandarizaión de variables categóricas
+
+```{r}
+yearBuilt_cat_conservar <- data.frame(table(Base_elegida$yearBuilt_cat)) %>%
+  filter(Freq >= 10) %>%
+  mutate(yearBuilt_cat_conservar = 'Si') %>%
+  rename(yearBuilt_cat = Var1)
+
+Base_elegida <- Base_elegida %>%
+  left_join(yearBuilt_cat_conservar) %>%
+  mutate(yearBuilt_cat = ifelse(is.na(yearBuilt_cat_conservar), "No se especifica", yearBuilt_cat)) %>%
+  select(-yearBuilt_cat_conservar, -Freq)
+
+
+```
+
+```{r}
+zipcode_conservar <- data.frame(table(Base_elegida$zipcode)) %>%
+  filter(Freq >= 10) %>%
+  mutate(zipcode_conservar = 'Si') %>%
+  rename(zipcode = Var1)
+
+Base_elegida <- Base_elegida %>%
+  left_join(zipcode_conservar) %>%
+  mutate(zipcode = ifelse(is.na(zipcode_conservar), "No se especifica", zipcode)) %>%
+  select(-zipcode_conservar, -Freq)
+
+```
+```{r}
+
+city_conservar <- data.frame(table(Base_elegida$city)) %>%
+  filter(Freq >= 10) %>%
+  mutate(city_conservar = 'Si') %>%
+  rename(city = Var1)
+
+Base_elegida <- Base_elegida %>%
+  left_join(city_conservar) %>%
+  mutate(city = ifelse(is.na(city_conservar), "No se especifica", city)) %>%
+  select(-city_conservar, -Freq)
+
+```
+```{r}
+
+homeType_conservar <- data.frame(table(Base_elegida$homeType)) %>%
+  filter(Freq >= 10) %>%
+  mutate(homeType_conservar = 'Si') %>%
+  rename(homeType = Var1)
+
+Base_elegida <- Base_elegida %>%
+  left_join(homeType_conservar) %>%
+  mutate(homeType = ifelse(is.na(homeType_conservar), "No se especifica", homeType)) %>%
+  select(-homeType_conservar, -Freq)
+
+```
+
+```{r}
+Data_descriptiva_2 <- Base_elegida %>%
+  group_by(yearBuilt_cat, zipcode, city, homeType) %>%
+  summarise(CONTEO = n(),
+            Promedio_Precio = mean(price),
+            DS_Precio = sd(price),
+            Promedio_hab = mean(bedrooms),
+            SD_hab = sd(bedrooms),
+            Promedio_baños = mean(bathrooms),
+            SD_baños = sd(bathrooms),
+            Promedio_L.A = mean(livingArea),
+            SD_L.A = sd(livingArea))
+```
+
+
+Visualización de correlación 
+
+```{r}
+numericas <- Base_elegida %>%
+  select(price,bedrooms,bathrooms,  livingArea)
+
+```
+
+
+```{r}
+library(scatterplot3d)
+
+attributes <- c('price', 'bedrooms', 'bathrooms', 'livingArea')
+
+pairs(Base_elegida[attributes], pch = 16, col = "blue", cex = 1.5)
+```
+
+
+```{r}
+train <- sample(nrow(Base_elegida),0.75*nrow(Base_elegida),replace = FALSE)
+
+Base_Entrenamiento <- Base_elegida[train,]
+Base_Prueba <- Base_elegida[-train,]
+
+```
+
+Modelo
+
+```{r}
+model <- lm(log(price) ~. , data=Base_Entrenamiento)
+summary(model)
+
+```
+
+```{r}
+predictions <- predict(model, newdata = Base_Prueba)
+
+base_final <- cbind(Base_Prueba, exp(predictions))
+
+base_final$`exp(predictions)`
+```
+
+
+```{r}
+base_final <- base_final%>%
+  mutate(Porcentaje_Error = abs((price - `exp(predictions)`)/`exp(predictions)`))
+
+mean(base_final$Porcentaje_Error)
+
+
+```
+
