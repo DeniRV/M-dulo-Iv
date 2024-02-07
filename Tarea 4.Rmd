@@ -1,0 +1,347 @@
+---
+title: "Tarea 1"
+author: "Abdías Tomás Pérez González - 
+Lizeth Itziguery Solano Romo 
+- Deni Itzae Ramírez Valadez"
+output: html_document
+date: "2024-01-31"
+---
+
+## Librerías
+
+Se realiza el proceso de cargar las paqueterías necesarias para el desarolllo de la tarea
+
+```{r,  message=FALSE, warning=FALSE}
+library(ggplot2)
+library(hrbrthemes)
+library(dplyr)
+library(reshape2)
+library(glmtoolbox)
+library(stats)
+library(caret)
+library(readr)
+library(tidyr)
+library(glmnet)
+```
+
+## Base de datos
+
+Importamos la base de datos con la que se trabajará, esta contiene información sobre el mercado inmobiliario, específicamente en Florida y los datos corresponden a la web de la compañía de bienes raíces Zillow
+
+```{r}
+Base_1 <- read.csv("C:/Users/ASUS/Desktop/Diplomado/Módulo IV/Semana 1/Tarea/FLORIDA2.csv")
+
+
+
+```
+
+La siguiente función se enfoca en realizar un primer proceso de limpieza de datos.
+
+```{r,message=FALSE, warning=FALSE}
+
+manejar_datos <- function(data){
+  n_row <- nrow(data)
+  nulos <- colSums(is.na(data))
+  columnas_nulos <- names(nulos[nulos > n_row*0.3])
+  data<-data %>% select(-columnas_nulos)
+  
+  columnas_numericas <- names(data %>% select_if(is.numeric))
+  columnas_categoricas <- names(data %>% select_if(is.character))
+  columnas_logicas <- names(data %>% select_if(is.logical))
+  
+  
+  for(col in columnas_numericas){
+    q1 <- quantile(data[[col]], 0.25, na.rm=TRUE)
+    q3 <- quantile(data[[col]], 0.75, na.rm=TRUE)
+    iqr <- q3 - q1
+    lower <- q1 - 1.5 * iqr
+    upper <- q3 + 1.5 * iqr
+    data[[col]] <- ifelse(data[[col]]< lower | data[[col]]> upper, NA, data[[col]])
+  }
+  
+  for(col in columnas_numericas){
+    data[[col]] <- ifelse(is.na(data[[col]]), mean(data[[col]], na.rm = TRUE), data[[col]])
+  }
+  
+  for(col in columnas_categoricas){
+    moda<- data[[col]] [which.max(tabulate(match(data[[col]],unique(data[[col]]))))]
+data[[col]]<- ifelse(is.na(data[[col]]), moda, data[[col]])
+    
+  }
+  for(col in columnas_categoricas){
+      if(length(unique(data[[col]]))==1){
+        data<-data%>%select(-col)
+      }
+  }
+  
+  
+  for(col in columnas_logicas){
+    moda<- data[[col]] [which.max(tabulate(match(data[[col]],unique(data[[col]]))))]
+data[[col]]<- ifelse(is.na(data[[col]]), moda, data[[col]])
+    
+  }
+  for(col in columnas_logicas){
+      if(length(unique(data[[col]]))==1){
+        data<-data%>%select(-col)
+      }
+  }
+  
+  
+    data<- distinct(data)
+    return(data)
+}
+Base_1_limpia<- manejar_datos(Base_1)
+
+
+```
+
+El siguiete paso fue hacer ajustes de formato en las siguientes variables:
+
+-   zipcode
+
+-   bedrooms
+
+-   yearBuilt_cat
+
+```{r}
+
+
+Base_1_limpia <- Base_1_limpia%>%
+  mutate(zipcode = as.integer(round(zipcode)))
+
+Base_1_limpia <- Base_1_limpia%>%
+  mutate(bedrooms = as.integer(round(bedrooms)))
+
+Base_1_limpia <- Base_1_limpia%>%
+  mutate(yearBuilt_cat = as.character(yearBuilt_cat))
+
+Base_1_limpia <- Base_1_limpia %>%
+  mutate(zipcode = as.character(zipcode))
+
+
+```
+
+A continuación, se implemntó un nuevo Data Frame que incluyera únicamente las variables que serán incluidas en el modelo de regresión lineal.
+
+```{r}
+Base_elegida <- Base_1_limpia %>%
+  select(price,bedrooms,bathrooms,  livingArea, yearBuilt_cat, zipcode, city, homeType)
+
+summary(Base_elegida)
+```
+
+Se llevó a cabo una nueva limpieza colocando límites inferiores y supeiores en las variables "price" "livingArea" con el objetivo de reducir el número de valores outliers.
+
+```{r}
+Base_elegida <- Base_elegida %>%
+  filter(price > 100000 & price < 2000000)%>%
+  filter(livingArea > 12 & livingArea < 5000)
+
+summary(Base_elegida)
+
+```
+
+Como siguiente paso, se realizó la validación de las variables categóricas para visualizar sus frecuencias.
+
+```{r}
+rango_año_construcción <- data.frame(table(Base_elegida$yearBuilt_cat))
+codigo_postal <- data.frame(table(Base_elegida$zipcode))
+Condado <- data.frame(table(Base_elegida$city))
+Tipo_casa <- data.frame(table(Base_elegida$homeType))
+```
+
+Después, se generó un Data descriptiva para una visualización en conjunto de las variables numéricas y categorícas.
+
+```{r}
+Data_descriptiva <- Base_elegida %>%
+  group_by(yearBuilt_cat, zipcode, city, homeType) %>%
+  summarise(CONTEO = n(),
+            Promedio_Precio = mean(price),
+            DS_Precio = sd(price),
+            Promedio_hab = mean(bedrooms),
+            SD_hab = sd(bedrooms),
+            Promedio_baños = mean(bathrooms),
+            SD_baños = sd(bathrooms),
+            Promedio_L.A = mean(livingArea),
+            SD_L.A = sd(livingArea))
+```
+
+Proceso de estandarizaión de variables categóricas.
+
+```{r}
+yearBuilt_cat_conservar <- data.frame(table(Base_elegida$yearBuilt_cat)) %>%
+  filter(Freq >= 10) %>%
+  mutate(yearBuilt_cat_conservar = 'Si') %>%
+  rename(yearBuilt_cat = Var1)
+
+Base_elegida <- Base_elegida %>%
+  left_join(yearBuilt_cat_conservar) %>%
+  mutate(yearBuilt_cat = ifelse(is.na(yearBuilt_cat_conservar), "No se especifica", yearBuilt_cat)) %>%
+  select(-yearBuilt_cat_conservar, -Freq)
+
+
+```
+
+```{r}
+zipcode_conservar <- data.frame(table(Base_elegida$zipcode)) %>%
+  filter(Freq >= 10) %>%
+  mutate(zipcode_conservar = 'Si') %>%
+  rename(zipcode = Var1)
+
+Base_elegida <- Base_elegida %>%
+  left_join(zipcode_conservar) %>%
+  mutate(zipcode = ifelse(is.na(zipcode_conservar), "No se especifica", zipcode)) %>%
+  select(-zipcode_conservar, -Freq)
+
+```
+
+```{r}
+
+city_conservar <- data.frame(table(Base_elegida$city)) %>%
+  filter(Freq >= 10) %>%
+  mutate(city_conservar = 'Si') %>%
+  rename(city = Var1)
+
+Base_elegida <- Base_elegida %>%
+  left_join(city_conservar) %>%
+  mutate(city = ifelse(is.na(city_conservar), "No se especifica", city)) %>%
+  select(-city_conservar, -Freq)
+
+```
+
+```{r}
+
+homeType_conservar <- data.frame(table(Base_elegida$homeType)) %>%
+  filter(Freq >= 10) %>%
+  mutate(homeType_conservar = 'Si') %>%
+  rename(homeType = Var1)
+
+Base_elegida <- Base_elegida %>%
+  left_join(homeType_conservar) %>%
+  mutate(homeType = ifelse(is.na(homeType_conservar), "No se especifica", homeType)) %>%
+  select(-homeType_conservar, -Freq)
+
+```
+
+Una nueva visualización descriptiva después del proceso de estandarización.
+
+```{r}
+Data_descriptiva_2 <- Base_elegida %>%
+  group_by(yearBuilt_cat, zipcode, city, homeType) %>%
+  summarise(CONTEO = n(),
+            Promedio_Precio = mean(price),
+            DS_Precio = sd(price),
+            Promedio_hab = mean(bedrooms),
+            SD_hab = sd(bedrooms),
+            Promedio_baños = mean(bathrooms),
+            SD_baños = sd(bathrooms),
+            Promedio_L.A = mean(livingArea),
+            SD_L.A = sd(livingArea))
+```
+
+Visualización de correlación de variables numéricas
+
+```{r}
+numericas <- Base_elegida %>%
+  select(price,bedrooms,bathrooms,  livingArea)
+
+```
+
+```{r}
+library(scatterplot3d)
+
+attributes <- c('price', 'bedrooms', 'bathrooms', 'livingArea')
+
+pairs(Base_elegida[attributes], pch = 16, col = "blue", cex = 1.5)
+```
+
+División de la base, el 75% será para la base de entrenamiento, mientras que el porcentaje restante será destinado a la base de prueba.
+
+```{r}
+
+set.seed(1234)
+
+train <- sample(nrow(Base_elegida),0.75*nrow(Base_elegida),replace = FALSE)
+
+Base_Entrenamiento <- Base_elegida[train,]
+Base_Prueba <- Base_elegida[-train,]
+
+```
+
+## MODELO CON TRANSFORMACION LOGARITMICA
+
+A continuación, se puso en marcha el modelo de regresión lineal con
+
+transformación logarítmica en la variable explicada:
+
+```{r}
+model <- lm(log(price) ~. , data=Base_Entrenamiento)
+summary(model)
+
+```
+
+```{r, message=FALSE, warning=FALSE, results = FALSE}
+predictions <- predict(model, newdata = Base_Prueba)
+
+base_final <- cbind(Base_Prueba, exp(predictions))
+
+base_final$`exp(predictions)`
+```
+
+Porcentaje de error de las predicciones en la base de prueba:
+```{r}
+
+
+base_final <- base_final%>%
+  mutate(Porcentaje_Error = abs((price - `exp(predictions)`)/`exp(predictions)`))
+
+mean(base_final$Porcentaje_Error)
+
+
+```
+
+Predicciones de precio en la base completa y Porcentaje de error de las predicciones
+
+```{r,   message=FALSE, warning=FALSE, results = FALSE}
+predictions <- predict(model, newdata = Base_elegida)
+
+base_final_completa <- cbind(Base_elegida, exp(predictions))
+
+base_final_completa$`exp(predictions)`
+
+
+
+```
+
+```{r,message=FALSE, warning=FALSE}
+base_final_completa <- base_final_completa %>%
+  mutate(Porcentaje_Error = abs((price - `exp(predictions)`)/`exp(predictions)`))
+
+mean(base_final_completa$Porcentaje_Error)
+```
+
+
+Opciones de compra
+
+Determinamos como opciones de compra aquellas casas que cumplan con los siguientes puntos:
+
+-   Un precio por debajo del promedio
+
+-   Contar con un total de habitaciones superior al promedio
+
+-   Tener un total de baños superior al promedio
+
+-   Presentar un Living Area superior al promedio
+
+-   El precio de la propiedad será menor al valor que haya predicho el modelo de regresión lineal
+
+```{r}
+opciones_compra <- base_final_completa%>%
+  filter(price < mean(price)) %>%
+  filter(bedrooms > mean(bedrooms)) %>%
+  filter(bathrooms > mean(bathrooms)) %>%
+  filter(livingArea > mean(livingArea))%>%
+  filter(Porcentaje_Error < 0.5) %>%
+  filter(`exp(predictions)` > price)
+head(opciones_compra)
+```
