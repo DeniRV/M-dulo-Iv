@@ -1,0 +1,206 @@
+---
+title: "Clasificación de daños resultado de colisiones entre automóviles en México durante 2022"
+autor: "Abdías Tomás Pérez González - 
+Lizeth Itziguery Solano Romo 
+- Deni Itzae Ramírez Valadez"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    css: styles.css
+runtime: shiny
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+modelo <- readRDS("modelo.rds")
+
+library(tidyverse)
+library(knitr)
+library(foreign)
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(car)
+library(MASS)
+library(stargazer)
+library(lmtest)
+library(zoo)
+library(erer)
+library(lattice)
+library(caret)
+library(e1071)
+library(arsenal) 
+library(DT)
+library(scales)
+library(htmltools)
+library(shiny)
+library(shinyWidgets)
+
+```
+
+
+
+
+```{r,echo=FALSE}
+inputPanel(
+  numericInput("AUTOMOVIL", label = "Automoviles involucrados:",
+               min = 0, max = 9, step = 1,
+               value = 2),
+  numericInput("CAMPASAJ", label = "Camioneta de pasajeros involucrados:",
+               min = 0, max = 4, step = 1,
+               value = 0),
+  numericInput("MICROBUS", label = "Autobuses pequeños involucrados:",
+               min = 0, max = 3, step = 1,
+               value = 0),
+  numericInput("PASCAMION", label = "Camiónes urbanos involucrados:",
+               min = 0, max = 4, step = 1,
+               value = 0),
+  numericInput("OMNIBUS", label = "Autobuses grandes involucrados:",
+               min = 0, max = 2, step = 1,
+               value = 1),
+  numericInput("TRANVIA", label = "Tranvias involucrados:",
+               min = 0, max = 1, step = 1,
+               value = 0),
+  numericInput("CAMIONETA", label = "Camionetas involucradas:",
+               min = 0, max = 3, step = 1,
+               value = 0),
+  numericInput("CAMION", label = "Camiones de carga involucrados:",
+               min = 0, max = 3, step = 1,
+               value = 0),
+  numericInput("TRACTOR", label = "Tractores involucrados:",
+               min = 0, max = 2, step = 1,
+               value = 0),
+  numericInput("FERROCARRI", label = "Trenes involucrados:",
+               min = 0, max = 2, step = 1,
+               value = 0),
+  
+  numericInput("MOTOCICLET", label = "Motocicletas involucradas:",
+               min = 0, max = 3, step = 1,
+               value = 0),
+  numericInput("BICICLETA", label = "Bicicletas involucradas:",
+               min = 0, max = 1, step = 1,
+               value = 0),
+  numericInput("OTROVEHIC", label = "Otro vehículo involucrado:",
+               min = 0, max = 2, step = 1,
+               value = 0),
+  
+  
+  numericInput("ID_EDAD", label = "Edad de conductor:",
+               min = 12, max = 93, step = 1,
+               value = 40),
+  #INPUTS DE SELCCION DE MENÚ
+  
+  selectInput("MES","Mes en el que ocurrió el accidente:",
+              choices = list("Enero" = 1,
+                             "Febrero" =  2,
+                             "Marzo" = 3,
+                             "Abril" = 4,
+                             "Mayo" = 5,
+                             "Junio" = 6,
+                             "Julio" = 7,
+                             "Agosto" = 8,
+                             "Septiembre" =9,
+                             "Octubre" = 10,
+                             "Noviembre" = 11,
+                             "Diciembre" = 12), selected = 12),
+  
+
+
+
+  #Check Box
+  
+  checkboxInput("SEXO_Hombre", "El conductor es hombre", value = T),
+  checkboxInput("CAPAROD_Pavimentada", "Estaba pavimentada la superficie en donde ocurrió el accidente", value = T),
+  checkboxInput("ALIENTO_Sí", "El conductor presentaba aliento alcohólico", value = T),
+  checkboxInput("CINTURON_Sí", "El conductor utilizaba cinturón de seguridad", value = T)
+  
+      )
+
+    
+  
+  
+
+###Ejecución de gráfica de probabilidad de acuerdo a los inputs 
+
+renderPlot({
+  grafica <- data.frame(AUTOMOVIL = input$AUTOMOVIL, CAMPASAJ=input$CAMPASAJ,
+                        MICROBUS=input$MICROBUS, PASCAMION=input$PASCAMION, 
+                        OMNIBUS=input$OMNIBUS, TRANVIA=input$TRANVIA, CAMIONETA=input$CAMIONETA,
+                        CAMION=input$CAMION, TRACTOR=input$TRACTOR, FERROCARRI=input$FERROCARRI,
+                        MOTOCICLET=input$MOTOCICLET, BICICLETA=input$BICICLETA, 
+                        OTROVEHIC=input$OTROVEHIC, ID_EDAD=input$ID_EDAD, MES=factor(input$MES) 
+                        ,SEXO_Hombre=input$SEXO_Hombre,CAPAROD_Pavimentada=input$CAPAROD_Pavimentada,
+                        ALIENTO_Sí=input$ALIENTO_Sí, CINTURON_Sí=input$CINTURON_Sí)
+  grafica[,16:19]=apply(grafica[,16:19],2, as.numeric)
+  
+  dt <- as.data.frame(cbind("Categoría"=names(predict(modelo, newdata=grafica, type="probs")),
+                            "Probabilidades" = round(predict(modelo, newdata=grafica, type="probs"),4)))
+  dt$Categoría[dt$Categoría=="Daños Materiales"]="Daños Materiales"
+  dt$Categoría[dt$Categoría=="Heridos"]="Sólo Heridos"
+  dt$Categoría[dt$Categoría=="Fallecidos y Lesionados"]="Accidente con fallecimientos y heridos"
+  dt$Categoría[dt$Categoría=="Fatal"]="Accidente con fallecimientos"
+  
+  dt$Probabilidades = round(as.numeric(dt$Probabilidades),4)
+  
+  #Ejecución de gráfico
+  
+  gra = ggplot(dt,aes(x = Categoría, y=Probabilidades, fill=Categoría))
+  
+  gra = gra + geom_bar(stat = "identity", show.legend = F)+
+    geom_text(aes(label=scales::percent(Probabilidades)), vjust=0)
+  
+  gra = gra + 
+  theme(plot.title = element_text(size = 28, face = "bold", hjust = 0)) + 
+  theme(plot.subtitle = element_text(size = 22, hjust = 0)) + 
+  theme(plot.caption = element_text(size = 14, hjust = 0)) +
+  theme(plot.margin = unit(c(1,1,1,1), "cm")) +
+  theme_bw() + 
+  theme(axis.title.x = element_text( size = 14, color = "black")) +
+  theme(axis.text.x = element_text( size = 12, color = "black")) +
+  theme(axis.title.y = element_text( size = 14, color = "black")) +
+  theme(axis.text.y = element_text( size = 12, color = "black")) +
+  scale_y_continuous(labels=scales::percent) +
+  scale_colour_manual(values = 'red') +
+  theme(text = element_text(color = "#3C4981")) +
+  labs(
+    title = "Nivel de daños resultado de una colisión entre vehículos",
+    subtitle = "Results considerando la configuración",
+    caption = "Fuente: INEGI. Accidentes de Tránsito Terrestre en Zonas Urbanas y Suburbanas 2022"
+  ) +
+  xlab("Category")
+
+gra 
+}, width = "auto", height = "auto")
+  
+  
+  
+renderTable({
+  grafica <- data.frame(AUTOMOVIL = input$AUTOMOVIL, CAMPASAJ=input$CAMPASAJ,
+                        MICROBUS=input$MICROBUS, PASCAMION=input$PASCAMION, 
+                        OMNIBUS=input$OMNIBUS, TRANVIA=input$TRANVIA, CAMIONETA=input$CAMIONETA,
+                        CAMION=input$CAMION, TRACTOR=input$TRACTOR, FERROCARRI=input$FERROCARRI,
+                        MOTOCICLET=input$MOTOCICLET, BICICLETA=input$BICICLETA, 
+                        OTROVEHIC=input$OTROVEHIC, ID_EDAD=input$ID_EDAD, MES=factor(input$MES), 
+                        SEXO_Hombre=input$SEXO_Hombre, CAPAROD_Pavimentada=input$CAPAROD_Pavimentada,
+                        ALIENTO_Sí=input$ALIENTO_Sí, CINTURON_Sí=input$CINTURON_Sí)
+  grafica[,16:19]=apply(grafica[,16:19],2, as.numeric)
+  
+   dt <- as.data.frame(cbind("Categoría"=names(predict(modelo, newdata=grafica, type="probs")),
+                            "Probabilidades" = round(predict(modelo, newdata=grafica, type="probs"),4)))
+  dt$Categoría[dt$Categoría=="Daños Materiales"]="Daños Materiales"
+  dt$Categoría[dt$Categoría=="Heridos"]="Sólo Heridos"
+  dt$Categoría[dt$Categoría=="Fallecidos y Lesionados"]="Accidente con fallecimientos y heridos"
+  dt$Categoría[dt$Categoría=="Fatal"]="Accidente con fallecimientos"
+  
+  dt$Probabilidades = round(as.numeric(dt$Probabilidades),4)
+  
+  dt
+})  
+  
+```
+
+
+
