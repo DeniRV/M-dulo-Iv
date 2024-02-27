@@ -1,0 +1,313 @@
+---
+title: "Trabajo Final: Modelo logit multinomial; Clasificación de daños resultado de colisiones entre automóviles en México durante 2022"
+autor: "Abdías Tomás Pérez González - 
+Lizeth Itziguery Solano Romo 
+- Deni Itzae Ramírez Valadez"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+```
+
+```{r}
+
+library(knitr)
+library(foreign)
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(car)
+library(MASS)
+library(tidyverse)
+library(stargazer)
+library(lmtest)
+library(zoo)
+library(erer)
+library(lattice)
+library(caret)
+library(e1071)
+library(arsenal) 
+library(sandwich)
+library(betareg)
+library(mfx)
+library(nnet)
+library(fastDummies)
+library(nnet)
+library(broom)
+library(kableExtra)
+library(gtsummary)
+library(marginaleffects)
+
+```
+
+# Introducción
+
+El presente trabajo tiene como objetivo principal la construcción de un modelo de clasificación multinomial múltiple, utilizando la base de datos recopilada por el Instituto Nacional de Estadística y Geografía (INEGI) bajo el título "Accidentes de Tránsito Terrestre en Zonas Urbanas y Suburbanas" correspondiente al año 2022 en México. La atención se centra en el análisis de diversos factores que contribuyen a los accidentes de tráfico, con especial énfasis en los resultados clasificados en categorías como "Daños Materiales", "Fallecidos y Lesionados", "Fatal" y "Heridos".
+
+## Proceso
+
+Se carga la base de datos y se realizan algunas operaciones para crear nuevas variables relevantes, como el total de fallecidos y heridos en cada accidente, así como la clasificación general de cada incidente.
+
+```{r}
+Accidentes <- read.csv('atus_anual_2022.csv')
+```
+
+```{r}
+dim(Accidentes)
+
+
+```
+
+```{r}
+
+
+Accidentes$Fallecidos <- rowSums(Accidentes[,c("CONDMUERTO","PASAMUERTO"),], na.rm = T)
+
+Accidentes$Heridos <- rowSums(Accidentes[,c("CONDHERIDO","PASAHERIDO"),], na.rm = T)
+```
+
+```{r}
+Accidentes$Clasificación <- " "
+
+Accidentes$Clasificación[(Accidentes$Fallecidos >= 1) & (Accidentes$Heridos < 1)] <- "Fatal"
+Accidentes$Clasificación[(Accidentes$Heridos >= 1) & (Accidentes$Fallecidos < 1)] <- "Heridos"
+Accidentes$Clasificación[(Accidentes$Fallecidos >= 1) & (Accidentes$Heridos >= 1)] <- "Fallecidos y Lesionados"
+Accidentes$Clasificación[(Accidentes$Fallecidos < 1) & (Accidentes$Heridos < 1)] <- "Daños Materiales"
+
+
+```
+
+## Análisis Exploratorio
+
+Se realizan conteos para entender la distribución de las clasificaciones de accidentes y algunas variables clave como el tipo de accidente, el uso del cinturón, el aliento del conductor, entre otros.
+
+```{r}
+Accidentes%>% count(CLASACC)
+Accidentes%>% count(Clasificación)
+Accidentes%>%count(CINTURON)
+Accidentes%>%count(ALIENTO)
+```
+
+```{r}
+Accidentes%>%count(TIPACCID)
+```
+
+## Filtrado y Selección de Variables:
+
+Se seleccionan únicamente las observaciones relacionadas con colisiones con vehículos automotores, y se eligen variables específicas para construir el modelo.
+
+
+```{r}
+Accidentes_Automovil <- Accidentes%>%
+  filter(
+    TIPACCID %in% c("Colisión con vehículo automotor"))
+```
+
+```{r}
+dim(Accidentes_Automovil)
+```
+
+```{r}
+Accidentes_Automovil <- Accidentes_Automovil %>%
+  dplyr::select(Fallecidos, Heridos, Clasificación, MES, AUTOMOVIL, CAMPASAJ, MICROBUS, PASCAMION, OMNIBUS, TRANVIA, CAMIONETA, CAMION, TRACTOR, FERROCARRI, MOTOCICLET, BICICLETA, OTROVEHIC,  CAPAROD, SEXO, ALIENTO, CINTURON, ID_EDAD)
+```
+
+```{r}
+Accidentes_Automovil%>% count(Clasificación)
+```
+
+```{r}
+Accidentes_Automovil%>%count(ID_EDAD)
+```
+
+Aplicamos el siguiente filtro, la razón se debe a que con base al diccionario de la base, las edades registradas como 0 y 99 corresponden a registros en donde se desconoce la edad o no se proporcionó la edad del conductor. Por esta razón, se tomó la decisión de no utilizar dichos datos.
+
+```{r}
+Accidentes_Automovil <- Accidentes_Automovil%>%
+  filter(ID_EDAD >= 12 & ID_EDAD < 99)
+```
+
+
+La decisión de no utilizar los registros en donde se ignora la presencia de aliento alcohólico y el uso del cinturón de seguridad, se deben a que la falta de información sobre la presencia de estas variables podrían afectar el rendimiento del modelo. 
+```{r}
+Accidentes_Automovil <- Accidentes_Automovil%>%
+  filter(!str_detect(ALIENTO, "Se ignora"))
+```
+
+```{r}
+Accidentes_Automovil <- Accidentes_Automovil%>%
+  filter(!str_detect(CINTURON, "Se ignora"))
+```
+
+Cambiamos el tipo de dato a factor para la variables correspondientes al Mes
+
+```{r}
+Accidentes_Automovil$MES <- factor(Accidentes_Automovil$MES) 
+
+```
+
+Visualizamos la distribución de los datos con los que trabajaremos:
+
+```{r}
+
+Accidentes_Automovil%>%count(CAPAROD)
+
+Accidentes_Automovil%>%count(SEXO)
+
+Accidentes_Automovil%>%count(ALIENTO)
+
+Accidentes_Automovil%>%count(CINTURON)
+
+Accidentes_Automovil%>%count(ID_EDAD)
+
+```
+
+Se convierten las variables categóricas en variables dummy para incluirlas en el modelo de manera adecuada.
+
+
+```{r}
+Accidentes_Automovil <- dummy_cols(Accidentes_Automovil, select_columns = c("CAPAROD","SEXO","ALIENTO", "CINTURON"))
+
+```
+
+```{r}
+#eliminar columnas que fueron convertidas a nummy 
+
+Accidentes_Automovil <- Accidentes_Automovil %>%
+ dplyr::select(-c("CAPAROD","SEXO","ALIENTO", "CINTURON"))
+```
+
+
+```{r}
+Accidentes_Automovil%>%count(Clasificación)
+```
+
+Se selecciona el 10% de la muestra de las categorías "Daños Materiales" y "Heridos" para equilibrar las clases y mejorar el rendimiento del modelo.
+
+```{r}
+DF_Daños <- subset(Accidentes_Automovil, Clasificación == "Daños Materiales")
+
+DF_Heridos <- subset(Accidentes_Automovil, Clasificación== "Heridos")
+
+```
+
+Seleccionamos el 10% de la muestra y ocupamos la raíz de aleatoriedad para que siempre suela ser la misma selección
+
+```{r}
+set.seed(1234)
+
+DF_Daños_10 <- Accidentes_Automovil[sample(nrow(DF_Daños), 4798, replace = F),]
+
+
+```
+
+```{r}
+set.seed(1234)
+
+DF_Heridos_10 <- Accidentes_Automovil[sample(nrow(DF_Heridos), 403, replace = F),]
+
+
+```
+
+```{r}
+Accidentes_Automovil<-Accidentes_Automovil %>%
+  filter(!str_detect(Clasificación,"Daños Materiales" ), !str_detect(Clasificación,"Heridos"))
+
+
+```
+
+```{r}
+
+
+Accidentes_Automovil <- rbind(DF_Daños_10, DF_Heridos_10, Accidentes_Automovil)
+
+
+```
+
+# Modelo
+
+La base de datos se divide en conjuntos de entrenamiento (70%) y prueba (30%) para evaluar el rendimiento del modelo.
+
+```{r}
+
+set.seed(1234)
+
+
+trainIndex <- createDataPartition(Accidentes_Automovil$Clasificación, 
+                                  p = 0.7,
+                                  list = FALSE,
+                                  times = 1)
+
+Entrenamiento <- Accidentes_Automovil[ trainIndex, ]
+Prueba <- Accidentes_Automovil[-trainIndex, ]
+
+Entrenamiento %>% count(Clasificación)
+
+Prueba %>% count(Clasificación)
+
+```
+
+# Ejecución de Modelo Logit Multinomial
+
+Se ajusta un modelo logit multinomial utilizando el paquete nnet en R, incluyendo las variables que decidimos utilizar en el modelo.
+
+```{r}
+model_complet <- multinom(Clasificación ~ MES + AUTOMOVIL + CAMPASAJ + MICROBUS + PASCAMION+ OMNIBUS + TRANVIA + CAMIONETA + CAMION + TRACTOR + FERROCARRI + MOTOCICLET+ BICICLETA+ OTROVEHIC + ID_EDAD   + CAPAROD_Pavimentada + SEXO_Hombre + ALIENTO_Sí + CINTURON_Sí ,data = Entrenamiento)
+
+saveRDS(model_complet, "modelo.rds")
+```
+
+```{r}
+tidy(model_complet, conf.int = T)
+```
+
+```{r}
+options(scipen=999)
+head(pp <- fitted(model_complet))
+```
+
+##Evaluación del Modelo:
+
+Se evalúa el rendimiento del modelo tanto en el conjunto de entrenamiento como en el de prueba calculando la precisión.
+
+```{r}
+
+Entrenamiento$predict <- predict(model_complet, newdata = Entrenamiento, "class")
+
+ctable <- table(Entrenamiento$Clasificación, Entrenamiento$predict)
+
+round((sum(diag(ctable))/sum(ctable))*100,2)
+
+
+```
+
+```{r}
+
+Prueba$predict <- predict(model_complet, newdata = Prueba, "class")
+
+
+ctable2 <- table(Prueba$Clasificación, Prueba$predict)
+
+round((sum(diag(ctable2))/sum(ctable2))*100,2)
+```
+
+
+
+
+## Aplicación del Modelo Completo:
+
+Se aplica el modelo al conjunto completo de datos para obtener una visión general del rendimiento del modelo en toda la base.
+
+```{r}
+Accidentes_Automovil$predict <- predict(model_complet, newdata = Accidentes_Automovil, "class")
+
+
+ctable2 <- table(Accidentes_Automovil$Clasificación, Accidentes_Automovil$predict)
+
+round((sum(diag(ctable2))/sum(ctable2))*100,2)
+```
+
